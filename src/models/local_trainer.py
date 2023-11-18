@@ -4,8 +4,8 @@ import pandas as pd
 from typing import Dict, List, Tuple, Any, Literal
 from sklearn.linear_model import LogisticRegression, RidgeClassifier, Lasso, Ridge
 from lightgbm import LGBMClassifier
-from sklearn.model_selection import StratifiedKFold, KFold
-from sklearn.preprocessing import QuantileTransformer
+from sklearn.model_selection import StratifiedKFold
+from sklearn.preprocessing import StandardScaler
 
 from .metrics import amex_metric
 
@@ -15,19 +15,30 @@ class LocalTrainer:
 
     Examples
     --------
-
-
+    >>> from src.models import LocalTrainer
+    >>> trainer = LocalTrainer()
+    >>> oof_preds = trainer.kfold_train(
+    ...     model_name="LR",
+    ...     model_params={"C": 0.1},
+    ...     train=train,
+    ...     feats=feats,
+    ...     target="target",
+    ...     n_splits=5,
+    ...     random_state=42,
+    ...     normlize=True,
+    ... )
+    >>> test_preds = trainer.predict(test)
     """
 
     def __init__(self):
         self.models: List[Any] = []  # trained models
         self.feats: List[str] = []  # feature names
         self.normalize: bool = False  # whether to normlize features
-        self.normalizers: List[QuantileTransformer] = []  # normalizer of each fold
+        self.normalizers: List[StandardScaler] = []  # normalizer of each fold
 
     def __normlize(
         self, train: pd.DataFrame, valid: pd.DataFrame, feats: List[str]
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, StandardScaler]:
         """Normlize features
 
         Parameters
@@ -41,10 +52,14 @@ class LocalTrainer:
 
         Returns
         -------
-        Tuple[pd.DataFrame, pd.DataFrame]
-            normlized train and valid set
+        pd.DataFrame
+            normlized train set
+        pd.DataFrame
+            normlized valid set
+        StandardScaler
+            normalizer
         """
-        normalizer = QuantileTransformer(output_distribution="normal")
+        normalizer = StandardScaler()
         normalizer.fit(train[feats])
         normalized_train = normalizer.transform(train[feats])
         normalized_valid = normalizer.transform(valid[feats])
@@ -125,13 +140,13 @@ class LocalTrainer:
         self,
         model_name: Literal["LR", "Ridge", "Lasso", "LGB"],
         model_params: Dict[str, Any],
-        train: pd.DataFrame,
+        train_df: pd.DataFrame,
         feats: List[str],
         target: str = "target",
         n_splits: int = 5,
         random_state: int = 42,
         normlize: bool = False,
-    ) -> np.ndarray:
+    ) -> pd.DataFrame:
         """K-fold train model
 
         Parameters
@@ -140,7 +155,7 @@ class LocalTrainer:
             model name, one of ['LR','Ridge','Lasso','LGB']
         model_params : Dict[str, Any]
             model parameters
-        train : pd.DataFrame
+        train_df : pd.DataFrame
             train set
         feats : List[str]
             feature names
@@ -155,8 +170,8 @@ class LocalTrainer:
 
         Returns
         -------
-        oof_preds : np.ndarray
-            out-of-fold predictions
+        pd.DataFrame
+            The out-of-fold predictions with ['customer_ID', 'prediction'] columns.
         """
         self.normalize = normlize
         self.feats = feats.copy()
@@ -164,46 +179,52 @@ class LocalTrainer:
         skf = StratifiedKFold(
             n_splits=n_splits, random_state=random_state, shuffle=True
         )
-        oof_preds = np.zeros(train.shape[0])
+        oof_preds = np.zeros(train_df.shape[0])
         models = []
-        for fold, (trn_idx, val_idx) in enumerate(skf.split(train, train[target])):
-            print(f"Fold {fold + 1}")
-            train_df = train.iloc[trn_idx]
-            valid_df = train.iloc[val_idx]
+        for fold, (trn_idx, val_idx) in enumerate(
+            skf.split(train_df, train_df[target])
+        ):
+            train_x = train_df.iloc[trn_idx]
+            valid_x = train_df.iloc[val_idx]
             model, valid_preds = self.__train(
-                model_name, model_params, train_df, valid_df, feats, target, normlize
+                model_name, model_params, train_x, valid_x, feats, target, normlize
             )
             oof_preds[val_idx] = valid_preds
             models.append(model)
             print(
-                f"Fold {fold + 1} Score: {amex_metric(valid_df[target].values, valid_preds):.4f}"
+                f"Fold {fold + 1} Score: {amex_metric(valid_x[target].values, valid_preds):.4f}"
             )
-            print()
-        print(f"Overall Score: {amex_metric(train[target].values, oof_preds):.4f}")
-        return oof_preds
+        self.models = models
+        print(f"Overall Score: {amex_metric(train_df[target].values, oof_preds):.4f}")
 
-    def predict(self, test: pd.DataFrame) -> np.ndarray:
+        oof_df = train_df[["customer_ID"]]
+        oof_df["prediction"] = oof_preds
+        return oof_df
+
+    def predict(self, test_df: pd.DataFrame) -> pd.DataFrame:
         """Predict on test set
 
         Parameters
         ----------
-        test : pd.DataFrame
+        test_df : pd.DataFrame
             test set
 
         Returns
         -------
-        np.ndarray
-            test predictions
+        pd.DataFrame
+            The predictions on the test set with ['customer_ID', 'prediction'] columns.
         """
-        test_preds = np.zeros(test.shape[0])
+        test_preds = np.zeros(test_df.shape[0])
         for fold, model in enumerate(self.models):
             if self.normalize:
-                test_x = self.normalizers[fold].transform(test[self.feats])
+                test_x = self.normalizers[fold].transform(test_df[self.feats])
             else:
-                test_x = test[self.feats].values
+                test_x = test_df[self.feats].values
 
             if isinstance(model, LGBMClassifier):
                 test_preds += model.predict_proba(test_x)[:, 1] / len(self.models)
             else:
                 test_preds += model.predict(test_x) / len(self.models)
-        return test_preds
+        test_pred_df = test_df[["customer_ID"]]
+        test_pred_df["prediction"] = test_preds
+        return test_pred_df
