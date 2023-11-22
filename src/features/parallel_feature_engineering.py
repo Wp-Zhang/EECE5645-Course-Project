@@ -37,7 +37,7 @@ def aggregate_data_spark(df: DataFrame) -> DataFrame:
         df_max = df_max.withColumnRenamed(f'max({feature})', f'{feature}_max')
 
     # Calculating the last value for each feature
-    windowSpec = Window.partitionBy('customer_ID').orderBy('some_time_column').rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+    windowSpec = Window.partitionBy('customer_ID').orderBy('S_2').rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
     for feature in features_last:
         df = df.withColumn(f'{feature}_last', F.last(F.col(feature), True).over(windowSpec))
 
