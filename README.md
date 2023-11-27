@@ -10,3 +10,8 @@ Project Structure:
     ├── features    <- Scripts to turn raw data into features for modeling.
     └── models      <- Scripts to train models and make predictions.
 ```
+
+Run pipeline in a spark cluster:
+```bash
+spark-submit --packages com.microsoft.azure:synapseml_2.12:1.0.1 parallel.py
+```
