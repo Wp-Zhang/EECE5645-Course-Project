@@ -15,6 +15,10 @@ from pyspark.ml import Pipeline, PipelineModel
 
 from synapse.ml.lightgbm import LightGBMClassifier
 from .metrics import amex_metric
+from ..utils import setup_logger, setup_timer
+
+logger = setup_logger(__name__)
+timer = setup_timer(logger)
 
 
 class ParallelTrainer:
@@ -30,7 +34,7 @@ class ParallelTrainer:
     ...     .config("spark.jars.repositories", "https://mmlspark.azureedge.net/maven")
     ...     .getOrCreate()
     ... )
-    >>> from src.models import ParallelTrainer
+    >>> from src.models.parallel_trainer import ParallelTrainer
     >>> trainer = ParallelTrainer(spark)
     >>> oof_preds = trainer.kfold_train(
     ...     model_name="LR",
@@ -188,6 +192,7 @@ class ParallelTrainer:
 
         return pipeline_model, valid_pred
 
+    @timer
     def kfold_train(
         self,
         model_name: Literal["LR", "Ridge", "Lasso", "LGB"],
@@ -229,7 +234,9 @@ class ParallelTrainer:
         self.normalize = normalize
 
         # * create a column to keep the original order of the rows
-        train_df = train_df.withColumn("row_num", F.monotonically_increasing_id())
+        train_df = train_df.withColumn(
+            "row_num", F.monotonically_increasing_id()  # .cast("string")
+        )
         row_nums = train_df.select("row_num").toPandas().values.flatten()
 
         # * create a dataframe to store oof predictions
@@ -245,11 +252,11 @@ class ParallelTrainer:
             skf.split(row_nums, oof_preds[target])
         ):
             train_fold = train_df.filter(
-                train_df["row_num"].isin((row_nums[train_idx]).tolist())
-            ).cache()
+                train_df["row_num"].isin(row_nums[train_idx].tolist())
+            )
             valid_fold = train_df.filter(
-                train_df["row_num"].isin((row_nums[valid_idx]).tolist())
-            ).cache()
+                train_df["row_num"].isin(row_nums[valid_idx].tolist())
+            )
 
             pipeline_model, valid_preds = self.__train(
                 model_name,
@@ -262,18 +269,19 @@ class ParallelTrainer:
             )
             valid_prediction = valid_preds["prediction"].values
             valid_target = valid_preds["target"].values
-            print(
+            logger.info(
                 f"Fold {fold + 1} Score: {amex_metric(valid_target, valid_prediction):.4f}"
             )
             oof_preds.loc[row_nums[valid_idx], "prediction"] = valid_prediction
             self.fold_piplines.append(pipeline_model)
 
-        print(
+        logger.info(
             f"Overall Score: {amex_metric(oof_preds[target].values, oof_preds['prediction'].values):.4f}"
         )
         oof_preds = oof_preds.reset_index(drop=True)
         return oof_preds
 
+    @timer
     def predict(self, test_df: DataFrame) -> pd.DataFrame:
         """Make predictions on the test set.
 
@@ -293,7 +301,7 @@ class ParallelTrainer:
         test_preds["prediction"] = 0
 
         for _, fold_pipeline in enumerate(self.fold_piplines):
-            test_fold_pred = fold_pipeline.transform(test_df).cache()
+            test_fold_pred = fold_pipeline.transform(test_df)
 
             if self.model_name in ["LR"]:
                 extract_prob_udf = F.udf(lambda x: float(x[1]), DoubleType())

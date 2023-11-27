@@ -8,6 +8,10 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 
 from .metrics import amex_metric
+from ..utils import setup_logger, setup_timer
+
+logger = setup_logger(__name__)
+timer = setup_timer(logger)
 
 
 class LocalTrainer:
@@ -15,7 +19,7 @@ class LocalTrainer:
 
     Examples
     --------
-    >>> from src.models import LocalTrainer
+    >>> from src.models.local_trainer import LocalTrainer
     >>> trainer = LocalTrainer()
     >>> oof_preds = trainer.kfold_train(
     ...     model_name="LR",
@@ -136,6 +140,7 @@ class LocalTrainer:
 
         return model, valid_preds
 
+    @timer
     def kfold_train(
         self,
         model_name: Literal["LR", "Ridge", "Lasso", "LGB"],
@@ -191,16 +196,19 @@ class LocalTrainer:
             )
             oof_preds[val_idx] = valid_preds
             models.append(model)
-            print(
+            logger.info(
                 f"Fold {fold + 1} Score: {amex_metric(valid_x[target].values, valid_preds):.4f}"
             )
         self.models = models
-        print(f"Overall Score: {amex_metric(train_df[target].values, oof_preds):.4f}")
+        logger.info(
+            f"Overall Score: {amex_metric(train_df[target].values, oof_preds):.4f}"
+        )
 
         oof_df = train_df[["customer_ID"]]
         oof_df["prediction"] = oof_preds
         return oof_df
 
+    @timer
     def predict(self, test_df: pd.DataFrame) -> pd.DataFrame:
         """Predict on test set
 
