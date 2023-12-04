@@ -150,7 +150,7 @@ class LocalTrainer:
         target: str = "target",
         n_splits: int = 5,
         random_state: int = 42,
-        normlize: bool = False,
+        normalize: bool = False,
     ) -> pd.DataFrame:
         """K-fold train model
 
@@ -170,15 +170,15 @@ class LocalTrainer:
             number of folds, by default 5
         random_state : int, optional
             random state, by default 42
-        normlize : bool, optional
-            whether to normlize features, by default False
+        normalize : bool, optional
+            whether to normalize features, by default False
 
         Returns
         -------
         pd.DataFrame
             The out-of-fold predictions with ['customer_ID', 'prediction'] columns.
         """
-        self.normalize = normlize
+        self.normalize = normalize
         self.feats = feats.copy()
 
         skf = StratifiedKFold(
@@ -192,7 +192,7 @@ class LocalTrainer:
             train_x = train_df.iloc[trn_idx]
             valid_x = train_df.iloc[val_idx]
             model, valid_preds = self.__train(
-                model_name, model_params, train_x, valid_x, feats, target, normlize
+                model_name, model_params, train_x, valid_x, feats, target, normalize
             )
             oof_preds[val_idx] = valid_preds
             models.append(model)
