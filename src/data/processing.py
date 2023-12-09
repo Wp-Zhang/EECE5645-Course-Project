@@ -1,20 +1,6 @@
 import numpy as np
 import pandas as pd
-import tqdm  
 
-import pyspark
-import pyspark.sql.functions as F
-from pyspark.sql import SparkSession, types
-from pyspark.sql import SQLContext
-import findspark
-from pyspark import SparkContext
-
-
-# Initialize Spark
-def init_spark():
-    findspark.init()
-    #sc = SparkContext(appName='ML_spark')
-    return SparkSession.builder.master("local[*]").getOrCreate()
 
 def readData(train_path, test_path):
     train_df = pd.read_csv(train_path)
@@ -165,12 +151,13 @@ def processing1_feat(x):
     x['S_18'] = floorify_frac(x['S_18'])
     x['S_20'] = floorify_frac(x['S_20'])
 
-    x['D_63'] = x['D_63'].apply(lambda t: {'CR':0, 'XZ':1, 'XM':2, 'CO':3, 'CL':4, 'XL':5}[t]).astype(np.int8)
+    #x['D_63'] = x['D_63'].apply(lambda t: {'CR':0, 'XZ':1, 'XM':2, 'CO':3, 'CL':4, 'XL':5}[t]).astype(np.int8)
     x['D_64'] = x['D_64'].apply(lambda t: {np.nan:-1, 'O':0, '-1':1, 'R':2, 'U':3}[t]).astype(np.int8)
     # can be rounded up as each bin has AUC of 0.5
     x['B_19'] = np.floor(x['B_19']*100).fillna(-1).astype(np.int8)
+    return x
 
-def processing2_feat(x) -> x:
+def processing2_feat(x):
     # this one has many more value overlaps, but the splits can be identified by S_15
     x.loc[(x.S_8>=0.30) & (x.S_8<=0.35) & (x.S_15<=6),'S_8'] = 0.3224889650033656
     x.loc[(x.S_8>=0.30) & (x.S_8<=0.35) & (x.S_15==7),'S_8'] = 0.3145925513763017
@@ -195,82 +182,19 @@ def processing2_feat(x) -> x:
     for c in floor_vals:    
         x['S_8'] = x['S_8'].apply(lambda t: floorify(t,c))
     x['S_8'] = np.round(x['S_8']*3166).fillna(-1).astype(np.int16)
+    return x
+    
+def processing3_feat(x):
+    cols = x.select_dtypes(include=[float]).columns
+    for col in cols:
+        x[col] = floorify_ones_and_zeros(x[col])
+    
+    for col in x.select_dtypes(include=[float]).columns.tolist():
+        x[col] = x[col].astype(np.float32)
+    
+    return x 
 
+## parallel 
+def write_parquet(x, path):
+    x.to_parquet(path)
 
-# Create a Spark schema based on the types of columns
-def create_spark_schema(series, string_dtypes, date_dtypes, types_map):
-    fields = []
-    for index, value in series.items():
-        dtype = types_map.get(str(value), types.StringType())
-        nullable = True
-        if index in string_dtypes:
-            dtype = types.StringType()
-        elif index in date_dtypes:
-            dtype = types.DateType()
-        fields.append(types.StructField(index, dtype, nullable))
-    return types.StructType(fields)
-
-# check data types
-def print_splits(*msg):
-    for m in msg:
-        print(m)
-        print()
-
-
-def main():
-    train_path = "/scratch/luo.min/Project/train_data.csv"
-    label_path = "/scratch/luo.min/Project/train_labels.csv"
-    test_path = "/scratch/luo.min/Project/test_data.csv"
-
-    # Initialize Spark
-    spark = init_spark()
-
-    #starting from the small subset 
-    train_df = pd.read_csv(train_path, nrows=100)
-    test_df = pd.read_csv(test_path, nrows=100)
-    label_df = pd.read_csv(label_path, nrows=100)
-
-    train_types = train_df.dtypes
-    train_types_count = train_types.value_counts()
-
-    ## Test types
-    test_types = test_df.dtypes
-    test_types_count = test_types.value_counts()
-
-    ## Label types
-    label_types = label_df.dtypes
-    label_types_count = label_types.value_counts()
-
-    print_splits(train_types_count, test_types_count, label_types_count)
-
-    # Types mapper
-    types_map = {
-        "object": types.StringType(),
-        "float64": types.FloatType(),
-        "int64": types.IntegerType(),}
-
-    # Known dtypes
-    string_dtypes = ['B_30', 'B_38', 'D_114', 'D_116', 'D_117', 'D_120', 'D_126', 'D_63', 'D_64', 'D_66', 'D_68']
-    date_dtypes = ['S_2']
-
-
-    train_schema = create_spark_schema(train_types, string_dtypes, date_dtypes, types_map)
-    test_schema = create_spark_schema(test_types,string_dtypes, date_dtypes, types_map)
-    label_schema = create_spark_schema(label_types, string_dtypes, date_dtypes, types_map)
-
-    # Set header to True or else it will be included as row
-    train_psdf = spark.read.option("header", "true").csv(train_path, schema=train_schema)
-    test_psdf = spark.read.option("header", "true").csv(test_path, schema=test_schema)
-    label_psdf = spark.read.option("header", "true").csv(label_path, schema=label_schema)
-
-    # Check schema
-    print_splits(test_psdf.schema[:10])
-    print(train_psdf.count())
-
-    train_psdf.write.parquet("train_amex")
-    test_psdf.write.parquet("test_amex")
-    label_psdf.write.parquet("label_amex")
-
-
-if __name__ == "__main__":
-    main()
