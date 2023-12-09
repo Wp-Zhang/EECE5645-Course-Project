@@ -18,18 +18,17 @@ spark = (
 spark.sparkContext.setLogLevel("ERROR")
 
 # * Load Data
-# train = spark.read.csv(str(DATA_PATH / 'raw' / 'train_data.csv'), header=True, inferSchema=True).limit(100)
-# test = spark.read.csv(str(DATA_PATH / 'raw' / 'test_data.csv'), header=True, inferSchema=True).limit(100)
-# label = spark.read.csv(str(DATA_PATH / 'raw' / 'train_labels.csv'), header=True, inferSchema=True)
-# train = train.join(label, on='customer_ID', how='left')
 
-train = pd.read_csv(DATA_PATH / "raw" / "train_data.csv", nrows=1000)
+#train = pd.read_csv(DATA_PATH / "raw" / "train_data.csv", nrows=1000)
 target = pd.read_csv(DATA_PATH / "raw" / "train_labels.csv")
-train = train.merge(target, on="customer_ID", how="left")
-test = pd.read_csv(DATA_PATH / "raw" / "test_data.csv", nrows=1000)
+train = spark.read.parquet(DATA_PATH/ "raw" / "train.parquet") #removed noise
+test = spark.read.parquet(DATA_PATH/ "raw" / "test.parquet")
 
-train = spark.createDataFrame(train)
-test = spark.createDataFrame(test)
+train = train.merge(target, on="customer_ID", how="left")
+
+from src.features.parallel_feature_engineering import aggregate_data_spark
+
+#train = aggregate_data_spark(train)
 
 feats = [
     col
