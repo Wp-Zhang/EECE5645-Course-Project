@@ -1,0 +1,21 @@
+---
+LR:
+  model_name: LR
+  model_params: { "regParam": 0.1 }
+  n_splits: 5
+  random_state: 2023
+  normalize: True
+
+Ridge:
+  model_name: Ridge
+  model_params: { "regParam": 0.1 }
+  n_splits: 5
+  random_state: 2023
+  normalize: True
+
+Lasso:
+  model_name: Lasso
+  model_params: { "regParam": 0.1 }
+  n_splits: 5
+  random_state: 2023
+  normalize: True
