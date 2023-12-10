@@ -34,10 +34,14 @@ if __name__ == "__main__":
     target = pd.read_csv(DATA_PATH / "raw" / "train_labels.csv")
     train = spark.read.parquet(DATA_PATH / "raw" / "train.parquet")  # removed noise
     test = spark.read.parquet(DATA_PATH / "raw" / "test.parquet")
+    
+    train = train.drop("D_63", "D_64")
+    test = test.drop("D_63", "D_64")
+    
+    train = aggregate_data_spark(train)
+    test = aggregate_data_spark(test)
 
-    train = train.merge(target, on="customer_ID", how="left")
-
-    # train = aggregate_data_spark(train)
+    train = train.join(target, on="customer_ID", how="left")
 
     feats = [
         col
