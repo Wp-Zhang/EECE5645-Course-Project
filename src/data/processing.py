@@ -1,11 +1,15 @@
 import numpy as np
 import pandas as pd
+from ..utils import setup_logger, setup_timer
+import argparse
 
+logger = setup_logger("Preprocessing")
+timer = setup_timer(logger)
 
-def readData(train_path, test_path):
-    train_df = pd.read_csv(train_path)
-    test_df = pd.read_csv(test_path)
-    return train_df, test_df
+def readData(path):
+    df = pd.read_csv(path)
+    #test_df = pd.read_csv(test_path)
+    return df
 
 def floorify(x, lo):
     """example: x in [0, 0.01] -> x := 0"""
@@ -59,6 +63,7 @@ def floorify_frac(x, interval=1):
         return xt.astype(np.int8)
     return xt.astype(np.int16) 
 
+@timer
 def processing1_feat(x): 
     x['B_4'] = floorify_frac(x['B_4'],1/78)
     x['B_16'] = floorify_frac(x['B_16'],1/12)
@@ -155,8 +160,10 @@ def processing1_feat(x):
     x['D_64'] = x['D_64'].apply(lambda t: {np.nan:-1, 'O':0, '-1':1, 'R':2, 'U':3}[t]).astype(np.int8)
     # can be rounded up as each bin has AUC of 0.5
     x['B_19'] = np.floor(x['B_19']*100).fillna(-1).astype(np.int8)
+    logger.info('processing1_feat done')                    
     return x
 
+@timer
 def processing2_feat(x):
     # this one has many more value overlaps, but the splits can be identified by S_15
     x.loc[(x.S_8>=0.30) & (x.S_8<=0.35) & (x.S_15<=6),'S_8'] = 0.3224889650033656
@@ -182,8 +189,10 @@ def processing2_feat(x):
     for c in floor_vals:    
         x['S_8'] = x['S_8'].apply(lambda t: floorify(t,c))
     x['S_8'] = np.round(x['S_8']*3166).fillna(-1).astype(np.int16)
+    logger.info('processing2_feat done')      
     return x
-    
+
+@timer
 def processing3_feat(x):
     cols = x.select_dtypes(include=[float]).columns
     for col in cols:
@@ -191,10 +200,27 @@ def processing3_feat(x):
     
     for col in x.select_dtypes(include=[float]).columns.tolist():
         x[col] = x[col].astype(np.float32)
-    
+        
+    logger.info('processing3_feat done')      
     return x 
 
 ## parallel 
 def write_parquet(x, path):
     x.to_parquet(path)
 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--train_path", type=str, default="./data")
+    parser.add_argument("--output_path", type=str, default="parquet/train.parquet")
+    args = parser.parse_args()
+    
+    # * Load Data
+    data = readData(args.train_path)
+    
+    #preprocissing 
+    data = processing1_feat(data)
+    data = processing2_feat(data)
+    data = processing3_feat(data)
+    
+    #write to parquet
+    write_parquet(data, args.output_path)
