@@ -1,6 +1,11 @@
 import numpy as np
 import pandas as pd
 import gc
+from ..utils import setup_logger, setup_timer
+
+
+logger = setup_logger("Feature_Engineering")
+timer = setup_timer(logger)
 
 features_avg = [
     "B_1",
@@ -487,7 +492,7 @@ features_max = [f for f in features_max if f not in ["D_63", "D_64"]]
 features_last = [f for f in features_last if f not in ["D_63", "D_64"]]
 
 
-#
+@timer
 def aggregate_data(df: pd.DataFrame) -> pd.DataFrame:
     """
     Adds new features to the input dataFrame: mean, minimum, maximum, and last value of certain features based on the customer id.

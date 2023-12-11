@@ -1,7 +1,12 @@
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
+from ..utils import setup_logger, setup_timer
 
+logger = setup_logger("Feature_Engineering")
+timer = setup_timer(logger)
+
+@timer
 def aggregate_data_spark(df: DataFrame) -> DataFrame:
     """
     Adds new features to the input PySpark DataFrame: mean, minimum, maximum, and last value of certain features based on the customer id.
