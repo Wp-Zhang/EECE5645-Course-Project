@@ -19,3 +19,24 @@ Lasso:
   n_splits: 5
   random_state: 2023
   normalize: True
+
+RF:
+  model_name: RF
+  model_params: { "numTrees": 100, "maxDepth": 5, "seed": 2023 }
+  n_splits: 5
+  random_state: 2023
+  normalize: False
+
+LGB:
+  model_name: LGB
+  model_params:
+    {
+      "objective": "binary",
+      "metric": "binary_logloss",
+      "maxDepth": -1,
+      "numLeaves": 64,
+      "learningRate": 0.035,
+    }
+  n_splits: 5
+  random_state: 2023
+  normalize: False

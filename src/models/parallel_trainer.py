@@ -8,7 +8,7 @@ import pyspark.sql.functions as F
 from pyspark.sql.types import DoubleType
 
 from pyspark.ml.feature import VectorAssembler, StandardScaler
-from pyspark.ml.classification import LogisticRegression
+from pyspark.ml.classification import LogisticRegression, RandomForestClassifier
 from pyspark.ml.regression import LinearRegression
 from pyspark.ml import Pipeline, PipelineModel
 
@@ -63,13 +63,13 @@ class ParallelTrainer:
         # fitted PipelineModels for each fold
         self.fold_piplines: List[PipelineModel] = []
         # model name
-        self.model_name: Literal["LR", "Ridge", "Lasso", "LGB"] = None
+        self.model_name: Literal["LR", "Ridge", "Lasso", "RF", "LGB"] = None
         # whether to normalize features
         self.normalize: bool = False
 
     def __create_model(
         self,
-        model_name: Literal["LR", "Ridge", "Lasso", "LGB"],
+        model_name: Literal["LR", "Ridge", "Lasso", "RF", "LGB"],
         model_params: Dict[str, Any],
         target: str,
     ) -> Any:
@@ -77,7 +77,7 @@ class ParallelTrainer:
 
         Parameters
         ----------
-        model_name : Literal["LR", "Ridge", "Lasso", "LGB"]
+        model_name : Literal["LR", "Ridge", "Lasso", "RF", "LGB"]
             The name of the model.
         model_params : Dict[str, Any]
             Model-specific parameters.
@@ -111,9 +111,12 @@ class ParallelTrainer:
                 elasticNetParam=1,
                 **model_params,
             )
+        elif model_name == "RF":
+            return RandomForestClassifier(
+                featuresCol=featuresCol, labelCol=target, **model_params
+            )
         elif model_name == "LGB":
             return LightGBMClassifier(
-                objective="binary",
                 featuresCol=featuresCol,
                 labelCol=target,
                 **model_params,
@@ -123,7 +126,7 @@ class ParallelTrainer:
 
     def __train(
         self,
-        model_name: Literal["LR", "Ridge", "Lasso", "LGB"],
+        model_name: Literal["LR", "Ridge", "Lasso", "RF", "LGB"],
         model_params: Dict[str, Any],
         train: DataFrame,
         valid: DataFrame,
@@ -135,8 +138,8 @@ class ParallelTrainer:
 
         Parameters
         ----------
-        model_name : Literal['LR','Ridge','Lasso','LGB']
-            model name, one of ['LR','Ridge','Lasso','LGB']
+        model_name : Literal['LR','Ridge','Lasso','RF','LGB']
+            model name, one of ['LR','Ridge','Lasso','RF','LGB']
         model_params : Dict[str, Any]
             model parameters
         train : pd.DataFrame
@@ -177,7 +180,7 @@ class ParallelTrainer:
 
         # * get valid predictions
         valid_pred = pipeline_model.transform(valid)
-        if model_name in ["LR"]:
+        if model_name in ["LR", "RF"]:
             extract_prob_udf = F.udf(lambda x: float(x[1]), DoubleType())
             valid_pred = valid_pred.withColumn(
                 "positive_probability", extract_prob_udf(F.col("probability"))
@@ -195,7 +198,7 @@ class ParallelTrainer:
     @timer
     def kfold_train(
         self,
-        model_name: Literal["LR", "Ridge", "Lasso", "LGB"],
+        model_name: Literal["LR", "Ridge", "Lasso", "RF", "LGB"],
         model_params: Dict[str, Any],
         train_df: DataFrame,
         feats: List[str],
@@ -208,7 +211,7 @@ class ParallelTrainer:
 
         Parameters
         ----------
-        model_name : Literal["LR", "Ridge", "Lasso", "LGB"]
+        model_name : Literal["LR", "Ridge", "Lasso", "RF", "LGB"]
             The name of the model to be trained.
         model_params : Dict[str, Any]
             Model-specific parameters.
@@ -303,7 +306,7 @@ class ParallelTrainer:
         for _, fold_pipeline in enumerate(self.fold_piplines):
             test_fold_pred = fold_pipeline.transform(test_df)
 
-            if self.model_name in ["LR"]:
+            if self.model_name in ["LR", "RF"]:
                 extract_prob_udf = F.udf(lambda x: float(x[1]), DoubleType())
                 test_fold_pred = test_fold_pred.withColumn(
                     "probability", extract_prob_udf(F.col("probability"))

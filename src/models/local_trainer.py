@@ -3,6 +3,7 @@ import pandas as pd
 
 from typing import Dict, List, Tuple, Any, Literal
 from sklearn.linear_model import LogisticRegression, RidgeClassifier, Lasso, Ridge
+from sklearn.ensemble import RandomForestClassifier
 from lightgbm import LGBMClassifier
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
@@ -71,7 +72,7 @@ class LocalTrainer:
 
     def __train(
         self,
-        model_name: Literal["LR", "Ridge", "Lasso", "LGB"],
+        model_name: Literal["LR", "Ridge", "Lasso", "RF", "LGB"],
         model_params: Dict[str, Any],
         train: pd.DataFrame,
         valid: pd.DataFrame,
@@ -83,8 +84,8 @@ class LocalTrainer:
 
         Parameters
         ----------
-        model_name : Literal['LR','Ridge','Lasso','LGB']
-            model name, one of ['LR','Ridge','Lasso','LGB']
+        model_name : Literal['LR','Ridge','Lasso','RF','LGB']
+            model name, one of ['LR','Ridge','Lasso','RF','LGB']
         model_params : Dict[str, Any]
             model parameters
         train : pd.DataFrame
@@ -117,6 +118,8 @@ class LocalTrainer:
             model = Ridge(**model_params)
         elif model_name == "Lasso":
             model = Lasso(**model_params)
+        elif model_name == "RF":
+            model = RandomForestClassifier(**model_params)
         elif model_name == "LGB":
             model = LGBMClassifier(**model_params)
         else:
@@ -133,7 +136,7 @@ class LocalTrainer:
         else:
             model.fit(train_x, train[target].values)
 
-        if model_name == "LGB":
+        if model_name in ["LGB", "RF"]:
             valid_preds = model.predict_proba(valid_x)[:, 1]
         else:
             valid_preds = model.predict(valid_x)
@@ -143,7 +146,7 @@ class LocalTrainer:
     @timer
     def kfold_train(
         self,
-        model_name: Literal["LR", "Ridge", "Lasso", "LGB"],
+        model_name: Literal["LR", "Ridge", "Lasso", "RF", "LGB"],
         model_params: Dict[str, Any],
         train_df: pd.DataFrame,
         feats: List[str],
@@ -156,8 +159,8 @@ class LocalTrainer:
 
         Parameters
         ----------
-        model_name : Literal['LR','Ridge','Lasso','LGB']
-            model name, one of ['LR','Ridge','Lasso','LGB']
+        model_name : Literal['LR','Ridge','Lasso','RF','LGB']
+            model name, one of ['LR','Ridge','Lasso','RF','LGB']
         model_params : Dict[str, Any]
             model parameters
         train_df : pd.DataFrame
