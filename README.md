@@ -11,12 +11,14 @@ Project Structure:
     └── models      <- Scripts to train models and make predictions.
 ```
 
-Run pipeline locally:
+Default data directory is `data/` and default config directory is `configs/`.
+
+Run logistic regression pipeline locally:
 ```bash
-python local.py --data_dir data/ --model LR --config ./configs/local.yaml
+python local.py --model LR
 ```
 
-Run pipeline in a spark cluster:
+Run logistic regression pipeline in a spark cluster:
 ```bash
-spark-submit --packages com.microsoft.azure:synapseml_2.12:1.0.1 parallel.py
+spark-submit --packages com.microsoft.azure:synapseml_2.12:1.0.1 parallel.py --model LR
 ```
