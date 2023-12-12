@@ -71,19 +71,18 @@ def after_pay_features_spark(df: DataFrame) -> DataFrame:
         for pcol in ['P_2','P_3']:
             if bcol in df.columns:
                 df = df.withColumn(f'{bcol}-{pcol}', F.col(bcol) - F.col(pcol))
+                features_average.append(f'{bcol}-{pcol}')
 
     return df
 
 def last_first_difference_features_spark(df: DataFrame) -> DataFrame:
-    windowSpec = Window.partitionBy('customer_ID').orderBy('S_2')
-
     for col in df.columns:
         if col.endswith('first'):
-            base_feature = col[:-6]  # Removes '_last' suffix
+            base_feature = col[:-6]  # Removes '_first' suffix
             last_col = base_feature + '_last'
 
-            df = df.withColumn(f'{base_feature}_first', F.first(F.col(base_feature)).over(windowSpec))
-            df = df.withColumn(f'{base_feature}_last_first_diff', F.col(last_col) - F.col(col))
+            if last_col in df.columns:
+                df = df.withColumn(f'{base_feature}_last_first_diff', F.col(last_col) - F.col(col))
     
     return df
 
