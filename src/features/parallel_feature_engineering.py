@@ -78,7 +78,7 @@ def last_first_difference_features_spark(df: DataFrame) -> DataFrame:
     windowSpec = Window.partitionBy('customer_ID').orderBy('S_2')
 
     for col in df.columns:
-        if col.endswith('_first'):
+        if col.endswith('first'):
             base_feature = col[:-6]  # Removes '_last' suffix
             last_col = base_feature + '_last'
 
