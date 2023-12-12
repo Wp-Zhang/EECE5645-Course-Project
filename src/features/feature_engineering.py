@@ -4,6 +4,7 @@ import gc
 from ..utils import setup_logger, setup_timer
 
 
+
 logger = setup_logger("Feature_Engineering")
 timer = setup_timer(logger)
 
@@ -11,7 +12,7 @@ features_avg = [
     "B_1",
     "B_2",
     "B_3",
-    "B_4",
+    "B_4",  
     "B_5",
     "B_6",
     "B_8",
@@ -491,8 +492,6 @@ features_min = [f for f in features_min if f not in ["D_63", "D_64"]]
 features_max = [f for f in features_max if f not in ["D_63", "D_64"]]
 features_last = [f for f in features_last if f not in ["D_63", "D_64"]]
 
-
-@timer
 def aggregate_data(df: pd.DataFrame) -> pd.DataFrame:
     """
     Adds new features to the input dataFrame: mean, minimum, maximum, and last value of certain features based on the customer id.
@@ -518,7 +517,10 @@ def aggregate_data(df: pd.DataFrame) -> pd.DataFrame:
 
     """
     cid = pd.Categorical(df.pop("customer_ID"), ordered=True)
-    last = cid != np.roll(cid, -1)  # mask for last statement of every customer
+    # Shift all elements in cid array by -1 and compare with original to see last occurrence
+    last = cid != np.roll(cid, -1) 
+    first = cid != np.roll(cid, 1)
+
     if "target" in df.columns:
         df.drop(columns=["target"], inplace=True)
     gc.collect()
@@ -544,13 +546,59 @@ def aggregate_data(df: pd.DataFrame) -> pd.DataFrame:
     )
     gc.collect()
     print("Computed max")
-    df = (
+    df_last = (
         df.loc[last, features_last]
         .rename(columns={f: f"{f}_last" for f in features_last})
         .set_index(np.asarray(cid[last]))
     )
     gc.collect()
     print("Computed last")
-    df = pd.concat([df, df_min, df_max, df_avg], axis=1)
+    df = (
+        df.loc[first, features_last]
+        .rename(columns={f: f"{f}_first" for f in features_last})
+        .set_index(np.asarray(cid[first]))
+    )
+    gc.collect()
+    print("Computed first")
+    df = pd.concat([df, df_last, df_min, df_max, df_avg], axis=1)
 
+    return df
+
+def after_pay_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Adds new "after-pay" features to the input dataFrame. Subtracting the payments from balance/spend provides
+    new information about the user' behavior
+    """
+
+    for bcol in [f'B_{i}' for i in [1,2,3,4,5,9,11,14,17,24]]+['D_39','D_131']+[f'S_{i}' for i in [16,23]]:
+        for pcol in ['P_2','P_3']:
+            if bcol in df.columns:
+                df[f'{bcol}-{pcol}'] = df[bcol] - df[pcol]
+                features_avg.append(f'{bcol}-{pcol}')
+
+    return df
+
+def last_first_difference_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    These added features shows the change from the first account of data to the last account of data.
+    """
+
+    for col in df.columns:
+        if col.endswith('first'):
+            base_feature = col[:-6]  # Removes '_first' suffix
+            last_col = base_feature + '_last'
+
+            if last_col in df.columns:
+                df[base_feature + '_last_first_diff'] = df[last_col] - df[col]
+    
+    return df
+
+@timer
+def feature_engineer(df: pd.DataFrame) -> pd.DataFrame:
+    df = after_pay_features(df)
+    df = aggregate_data(df)
+    df = last_first_difference_features(df)
+
+    logger.info('feature engineering done')  
+    
     return df

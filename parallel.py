@@ -16,7 +16,7 @@ spark = (
 )
 spark.sparkContext.setLogLevel("ERROR")
 
-from src.features.parallel_feature_engineering import aggregate_data_spark
+from src.features.parallel_feature_engineering import feature_engineer_spark
 from src.models.parallel_trainer import ParallelTrainer
 from src.utils import setup_logger
 
@@ -38,8 +38,8 @@ if __name__ == "__main__":
     train = train.drop("D_63", "D_64")
     test = test.drop("D_63", "D_64")
     
-    train = aggregate_data_spark(train)
-    test = aggregate_data_spark(test)
+    train = feature_engineer_spark(train)
+    test = feature_engineer_spark(test)
 
     train = train.join(target, on="customer_ID", how="left")
 

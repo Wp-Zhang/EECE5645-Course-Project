@@ -2,7 +2,7 @@ from pathlib import Path
 import warnings
 import pandas as pd
 
-from src.features.feature_engineering import aggregate_data
+from src.features.feature_engineering import feature_engineer
 from src.models.local_trainer import LocalTrainer
 from src.utils import setup_logger
 import argparse
@@ -28,8 +28,8 @@ if __name__ == "__main__":
     test.drop(columns=["S_2", "D_63", "D_64"], inplace=True)
 
     # * Feature Engineering
-    train = aggregate_data(train)
-    test = aggregate_data(test)
+    train = feature_engineer(train)
+    test = feature_engineer(test)
     train["customer_ID"] = train.index
     test["customer_ID"] = test.index
     train = train.merge(target, on="customer_ID", how="left")
