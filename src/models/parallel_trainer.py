@@ -1,7 +1,6 @@
 from typing import Dict, List, Tuple, Any, Literal
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import StratifiedKFold
 
 from pyspark.sql import SparkSession, DataFrame
 import pyspark.sql.functions as F
@@ -10,7 +9,9 @@ from pyspark.sql.types import DoubleType
 from pyspark.ml.feature import VectorAssembler, StandardScaler
 from pyspark.ml.classification import LogisticRegression, RandomForestClassifier
 from pyspark.ml.regression import LinearRegression
-from pyspark.ml import Pipeline, PipelineModel
+from pyspark.ml import Pipeline
+from pyspark.ml.tuning import CrossValidator, ParamGridBuilder, CrossValidatorModel
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
 
 
 from synapse.ml.lightgbm import LightGBMClassifier
@@ -61,7 +62,7 @@ class ParallelTrainer:
         # feature names
         self.feats: List[str] = []
         # fitted PipelineModels for each fold
-        self.fold_piplines: List[PipelineModel] = []
+        self.model: CrossValidatorModel = None
         # model name
         self.model_name: Literal["LR", "Ridge", "Lasso", "RF", "LGB"] = None
         # whether to normalize features
@@ -124,77 +125,6 @@ class ParallelTrainer:
         else:
             raise NotImplementedError
 
-    def __train(
-        self,
-        model_name: Literal["LR", "Ridge", "Lasso", "RF", "LGB"],
-        model_params: Dict[str, Any],
-        train: DataFrame,
-        valid: DataFrame,
-        feats: List[str],
-        target: str = "target",
-        normalize: bool = False,
-    ) -> Tuple[Any, np.ndarray]:
-        """Train model on train set and evaluate on valid set
-
-        Parameters
-        ----------
-        model_name : Literal['LR','Ridge','Lasso','RF','LGB']
-            model name, one of ['LR','Ridge','Lasso','RF','LGB']
-        model_params : Dict[str, Any]
-            model parameters
-        train : pd.DataFrame
-            train set
-        valid : pd.DataFrame
-            valid set
-        feats : List[str]
-            feature names
-        target : str, optional
-            target name, by default "target"
-        normalize : bool, optional
-            whether to normalize features, by default False
-
-        Returns
-        -------
-        model : Any
-            trained model
-        valid_preds : np.ndarray
-            valid predictions
-        """
-        self.model_name = model_name
-        # * create fold pipeline
-        assembler = VectorAssembler(inputCols=feats, outputCol="features")
-        stages = [assembler]
-        if normalize:
-            scaler = StandardScaler(
-                inputCol="features",
-                outputCol="scaled_features",
-                withStd=True,
-                withMean=True,
-            )
-            stages.append(scaler)
-        model = self.__create_model(model_name, model_params, target)
-        stages.append(model)
-
-        pipeline = Pipeline(stages=stages)
-        pipeline_model = pipeline.fit(train)
-
-        # * get valid predictions
-        valid_pred = pipeline_model.transform(valid)
-        if model_name in ["LR", "RF"]:
-            extract_prob_udf = F.udf(lambda x: float(x[1]), DoubleType())
-            valid_pred = valid_pred.withColumn(
-                "positive_probability", extract_prob_udf(F.col("probability"))
-            )
-            valid_pred = valid_pred.select(
-                "row_num", target, F.col("positive_probability").alias("prediction")
-            ).toPandas()
-        else:
-            valid_pred = valid_pred.select("row_num", target, "prediction").toPandas()
-
-        self.fold_piplines.append(pipeline_model)
-
-        return pipeline_model, valid_pred
-
     @timer
     def kfold_train(
         self,
@@ -236,53 +166,34 @@ class ParallelTrainer:
         self.feats = feats.copy()
         self.normalize = normalize
 
-        # * create a column to keep the original order of the rows
-        train_df = train_df.withColumn(
-            "row_num", F.monotonically_increasing_id()  # .cast("string")
+        # * create pipeline
+        assembler = VectorAssembler(inputCols=feats, outputCol="features")
+        stages = [assembler]
+        if normalize:
+            scaler = StandardScaler(
+                inputCol="features",
+                outputCol="scaled_features",
+                withStd=True,
+                withMean=True,
+            )
+            stages.append(scaler)
+        model = self.__create_model(model_name, model_params, target)
+        stages.append(model)
+
+        pipeline = Pipeline(stages=stages)
+
+        # * K-fold cross-validation training
+        crossval = CrossValidator(
+            estimator=pipeline,
+            evaluator=BinaryClassificationEvaluator(labelCol=target),
+            estimatorParamMaps=ParamGridBuilder().build(),
+            numFolds=n_splits,
+            seed=random_state,
         )
-        row_nums = train_df.select("row_num").toPandas().values.flatten()
+        cv_model = crossval.fit(train_df)
 
-        # * create a dataframe to store oof predictions
-        oof_preds = train_df.select("row_num", "customer_ID", target).toPandas()
-        oof_preds["prediction"] = 0
-        oof_preds = oof_preds.set_index("row_num")
-
-        # * stratified k-fold training
-        skf = StratifiedKFold(
-            n_splits=n_splits, random_state=random_state, shuffle=True
-        )
-        for fold, (train_idx, valid_idx) in enumerate(
-            skf.split(row_nums, oof_preds[target])
-        ):
-            train_fold = train_df.filter(
-                train_df["row_num"].isin(row_nums[train_idx].tolist())
-            )
-            valid_fold = train_df.filter(
-                train_df["row_num"].isin(row_nums[valid_idx].tolist())
-            )
-
-            pipeline_model, valid_preds = self.__train(
-                model_name,
-                model_params,
-                train_fold,
-                valid_fold,
-                feats,
-                target,
-                normalize,
-            )
-            valid_prediction = valid_preds["prediction"].values
-            valid_target = valid_preds["target"].values
-            logger.info(
-                f"Fold {fold + 1} Score: {amex_metric(valid_target, valid_prediction):.4f}"
-            )
-            oof_preds.loc[row_nums[valid_idx], "prediction"] = valid_prediction
-            self.fold_piplines.append(pipeline_model)
-
-        logger.info(
-            f"Overall Score: {amex_metric(oof_preds[target].values, oof_preds['prediction'].values):.4f}"
-        )
-        oof_preds = oof_preds.reset_index(drop=True)
-        return oof_preds
+        self.model = cv_model
+        return
 
     @timer
     def predict(self, test_df: DataFrame) -> pd.DataFrame:
@@ -298,29 +209,17 @@ class ParallelTrainer:
         pd.DataFrame
             The predictions on the test set with ['customer_ID', 'prediction'] columns.
         """
-        test_df = test_df.withColumn("row_num", F.monotonically_increasing_id())
-        test_preds = test_df.select("customer_ID", "row_num").toPandas()
-        test_preds = test_preds.set_index("row_num")
-        test_preds["prediction"] = 0
+        test_pred = self.model.transform(test_df)
 
-        for _, fold_pipeline in enumerate(self.fold_piplines):
-            test_fold_pred = fold_pipeline.transform(test_df)
+        if self.model_name in ["LR", "RF"]:
+            extract_prob_udf = F.udf(lambda x: float(x[1]), DoubleType())
+            test_pred = test_pred.withColumn(
+                "probability", extract_prob_udf(F.col("probability"))
+            )
+            test_pred = test_pred.select(
+                "customer_ID", F.col("probability").alias("prediction")
+            ).toPandas()
+        else:
+            test_pred = test_pred.select("customer_ID", "prediction").toPandas()
 
-            if self.model_name in ["LR", "RF"]:
-                extract_prob_udf = F.udf(lambda x: float(x[1]), DoubleType())
-                test_fold_pred = test_fold_pred.withColumn(
-                    "probability", extract_prob_udf(F.col("probability"))
-                )
-                test_fold_pred = test_fold_pred.select(
-                    "row_num", F.col("probability").alias("prediction")
-                ).toPandas()
-            else:
-                test_fold_pred = test_fold_pred.select(
-                    "row_num", "prediction"
-                ).toPandas()
-            test_preds.loc[test_fold_pred["row_num"], "prediction"] += (
-                test_fold_pred["prediction"].values
-            ) / len(self.fold_piplines)
-
-        test_preds = test_preds.reset_index(drop=True)
-        return test_preds
+        return test_pred
