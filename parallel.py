@@ -18,6 +18,7 @@ spark.sparkContext.setLogLevel("ERROR")
 
 from src.features.parallel_feature_engineering import feature_engineer_spark
 from src.models.parallel_trainer import ParallelTrainer
+from src.models.metrics import amex_metric
 from src.utils import setup_logger
 
 if __name__ == "__main__":
@@ -28,19 +29,25 @@ if __name__ == "__main__":
     args = parser.parse_args()
     logger = setup_logger("Parallel")
 
+    model_config = Box.from_yaml(filename=args.config).get(args.model)
+
     # * Load Data
     DATA_PATH = Path(args.data_dir)
     # train = pd.read_csv(DATA_PATH / "raw" / "train_data.csv", nrows=1000)
-    target = pd.read_csv(DATA_PATH / "raw" / "train_labels.csv")
-    train = spark.read.parquet(DATA_PATH / "raw" / "train.parquet")  # removed noise
-    test = spark.read.parquet(DATA_PATH / "raw" / "test.parquet")
-    
+    target = pd.read_csv(DATA_PATH / "train_labels.csv")
+    # train = spark.read.csv(str(DATA_PATH / "train.csv")).limit(100)  # removed noise
+    # test = spark.read.csv(str(DATA_PATH / "test.csv")).limit(100)
+    train = spark.read.parquet(str(DATA_PATH / "train.parquet"))  # removed noise
+    test = spark.read.parquet(str(DATA_PATH / "test.parquet"))
+
     train = train.drop("D_63", "D_64")
     test = test.drop("D_63", "D_64")
-    
+
     train = feature_engineer_spark(train)
     test = feature_engineer_spark(test)
 
+    # * transform target to spark dataframe
+    target = spark.createDataFrame(target)
     train = train.join(target, on="customer_ID", how="left")
 
     feats = [
@@ -53,7 +60,6 @@ if __name__ == "__main__":
     test = test.fillna(-1)
 
     # * Train Model
-    model_config = Box.from_yaml(filename=args.config).get(args.model)
     logger.info(f"Model Config: {model_config}")
 
     plr_trainer = ParallelTrainer(spark)
@@ -65,4 +71,6 @@ if __name__ == "__main__":
     )
 
     test_pred = plr_trainer.predict(test)
-    logger.info(test_pred.head())
+    test_target = pd.read_csv(DATA_PATH / "test_labels.csv")
+    test_pred = test_pred.merge(test_target, on="customer_ID", how="left")
+    logger.info(amex_metric(test_pred["target"], test_pred["prediction"]))
